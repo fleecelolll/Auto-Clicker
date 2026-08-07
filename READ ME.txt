@@ -1,0 +1,105 @@
+FLEECE AUTO CLICKER
+
+A little tool I made with AI to automate mouse clicking locally on 64-bit Windows.
+
+
+INSTALL
+
+1. Keep every included file together in the extracted folder.
+
+2. Double click Installer.bat.
+
+3. Let setup finish every check. The first run can take a few minutes.
+
+4. Double click the "Auto Clicker" shortcut that setup creates in this folder.
+
+You can copy that shortcut to your Desktop or pin it to the taskbar. The shortcut launches the app with its own private Python environment.
+
+Run Installer.bat again whenever setup needs repair or after moving the folder to a different location so the shortcut can be refreshed.
+
+
+UPDATES
+
+Run Installer.bat again to repair or update the private app components. Setup keeps your saved clicking preferences and recreates the shortcut for the folder's current location.
+
+
+WHAT THE INSTALLER ADDS
+
+- Uses a compatible 64-bit Python 3.10 through 3.14 already on the PC when possible.
+
+- Otherwise offers to download official Python 3.14.7 privately into this folder.
+
+- Installs the pinned PySide6 window components from official PyPI.
+
+- Verifies downloaded private-runtime files with SHA-256 checksums.
+
+- Compiles the app source and runs non-clicking self-tests.
+
+- Creates a normal double-clickable shortcut for the app.
+
+- Installs one shared per-user Fleece Tools launcher here:
+
+  %LOCALAPPDATA%\Fleece Tools\Python Launcher
+
+- Sets .pyw files to use that shared launcher for your Windows account.
+
+The launcher first looks for .venv\Scripts\pythonw.exe beside the selected .pyw file, then .runtime\python\pythonw.exe beside it. It never uses another tool's private Python.
+
+Before the first Fleece Tools association change, setup exports existing per-user .pyw settings into the shared launcher folder. If setup cannot safely save an existing non-Fleece setting, it stops without overwriting it. If you choose a different .pyw app later, future setup runs leave that newer choice alone.
+
+Setup does not need administrator access, change PATH, install global Python packages, or install a background service.
+
+
+USE
+
+1. Choose clicks per second or the delay between clicks in milliseconds.
+
+2. Choose the mouse button and whether one click or a double click should be sent.
+
+3. Choose whether it should stop only when you stop it, after a number of clicks, or after a number of seconds.
+
+4. Optionally set a wait before starting, slightly random timing, or one saved screen position.
+
+5. To change the keyboard shortcut, click its box and press any key combination. Press Esc to cancel the change.
+
+6. Press Start clicking or your saved keyboard shortcut. Press that shortcut again to stop, or press F8 at any time for the emergency stop.
+
+F8 always remains the emergency stop, including during the wait before starting. The saved-position option moves the cursor back to that spot before every click. Windows may keep a shortcut that is already used by the system or another app.
+
+One-click mode allows up to 500 clicks per second and a shortest delay of 2 milliseconds. Double-click mode allows up to 250 double-clicks per second and a shortest delay of 4 milliseconds. Each double-click sends two clicks, so 250 double-clicks can send up to 500 individual clicks per second. The exact rate another app or website receives still depends on that app, Windows, and the computer.
+
+
+PRIVACY
+
+The app runs locally. It has no accounts, analytics, telemetry, advertisements, or runtime network requests.
+
+Preferences are saved only in:
+
+  .runtime\settings.ini
+
+
+TROUBLESHOOTING
+
+If setup fails, check your internet connection and run Installer.bat again. Details are saved in setup.log. The log can include local folder paths, so review it before sharing it.
+
+If the Auto Clicker shortcut does not open, rerun Installer.bat and make sure every final check passes. Setup recreates the shortcut for the folder's current location. Keep the complete folder together.
+
+
+REMOVE
+
+To remove only Auto Clicker, delete this folder. The app does not add itself to startup, install a Windows service, or create an uninstaller entry.
+
+The shared .pyw launcher can be used by every Fleece Tool, so deleting one tool does not remove it. To restore the .pyw settings that existed before Fleece Tools first changed them, run:
+
+  %LOCALAPPDATA%\Fleece Tools\Python Launcher\Restore pyw association.cmd
+
+The restore helper stops without overwriting a newer non-Fleece choice. After restoring, and after removing every Fleece Tool that uses the launcher, you can delete the shared Python Launcher folder. Its registry backup files can include local program names and paths, so review them before sharing.
+
+
+SOURCE AND RESPONSIBLE USE
+
+Source: https://github.com/fleecelolll/Auto-Clicker
+
+This project was made with AI.
+
+Only automate clicking where you have permission. Keep F8 available, especially at high click rates or when using a fixed position.
