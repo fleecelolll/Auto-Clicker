@@ -13,7 +13,7 @@ from pathlib import Path
 
 
 APP_NAME = "Auto Clicker"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 APP_DIR = Path(__file__).resolve().parent
 RUNTIME_DIR = APP_DIR / ".runtime"
 SETTINGS_PATH = RUNTIME_DIR / "settings.ini"
@@ -241,8 +241,6 @@ else:
 
 
 class WindowsClickTiming:
-    """Use precise Windows waits only while a click job is active."""
-
     def __init__(self):
         self.period_enabled = False
         self.waitable_timer = None
@@ -267,7 +265,6 @@ class WindowsClickTiming:
         return self
 
     def wait_until_deadline(self, deadline, stop_event):
-        """Wait precisely while keeping every longer wait responsive to F8."""
         while True:
             if stop_event.is_set():
                 return True
@@ -328,7 +325,6 @@ def release_app_mutex():
 
 
 def _try_create_named_mutex(name):
-    """Return an acquired handle or a stable reason why it was not acquired."""
     if NATIVE_KERNEL32 is None:
         return "unavailable", None
     ctypes.set_last_error(0)
@@ -458,7 +454,6 @@ TARGET_FIXED = "Always click one saved spot"
 
 
 def normalize_hotkey(virtual_key, modifiers):
-    """Return a safe keyboard-only shortcut and discard unknown modifier bits."""
     try:
         virtual_key = int(virtual_key)
     except (TypeError, ValueError, OverflowError):
@@ -682,12 +677,10 @@ class WindowsMouseController:
         self._click_senders[(button, bool(double_click))]()
 
     def prepare_click(self, button, double_click=False):
-        """Return the already-built native input sender for one click job."""
         return self._click_senders[(button, bool(double_click))]
 
 
 def wait_until_deadline(deadline, stop_event):
-    """Wait accurately without making long waits unresponsive to F8."""
     while True:
         if stop_event.is_set():
             return True
@@ -3038,10 +3031,6 @@ def main():
     if "--self-test" in sys.argv:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     elif "--screenshot" in sys.argv:
-        # The offscreen Qt backend available on Windows does not load Segoe UI
-        # reliably, so screenshots can contain empty glyph boxes even when the
-        # real app renders correctly. Use the normal Windows backend for visual
-        # regression captures while keeping the no-input self-test headless.
         os.environ.setdefault("QT_QPA_PLATFORM", "windows")
     else:
         if not acquire_app_mutex():
