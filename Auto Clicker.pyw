@@ -13,7 +13,7 @@ from pathlib import Path
 
 
 APP_NAME = "Auto Clicker"
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.0.2"
 APP_DIR = Path(__file__).resolve().parent
 RUNTIME_DIR = APP_DIR / ".runtime"
 SETTINGS_PATH = RUNTIME_DIR / "settings.ini"
@@ -55,7 +55,7 @@ def bootstrap_local_python():
             for path in (local_python, local_pythonw)
             if path.is_file()
         }
-        if current in valid_executables:
+        if current in valid_executables and sys.flags.isolated:
             return
         if not local_python.is_file() or not local_pythonw.is_file():
             continue
@@ -71,7 +71,12 @@ def bootstrap_local_python():
             if validation.returncode != 0:
                 continue
             subprocess.Popen(
-                [str(local_pythonw), str(Path(__file__).resolve()), *sys.argv[1:]],
+                [
+                    str(local_pythonw),
+                    "-I",
+                    str(Path(__file__).resolve()),
+                    *sys.argv[1:],
+                ],
                 cwd=str(APP_DIR),
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
@@ -3027,7 +3032,6 @@ def main():
     if os.name != "nt":
         show_native_error("Auto Clicker supports 64-bit Windows only.")
         return 1
-    diagnostic_mode = "--self-test" in sys.argv or "--screenshot" in sys.argv
     if "--self-test" in sys.argv:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     elif "--screenshot" in sys.argv:
