@@ -13,7 +13,7 @@ from pathlib import Path
 
 
 APP_NAME = "Auto Clicker"
-APP_VERSION = "1.0.2"
+APP_VERSION = "1.0.3"
 APP_DIR = Path(__file__).resolve().parent
 RUNTIME_DIR = APP_DIR / ".runtime"
 SETTINGS_PATH = RUNTIME_DIR / "settings.ini"
@@ -60,16 +60,17 @@ def bootstrap_local_python():
         if not local_python.is_file() or not local_pythonw.is_file():
             continue
         try:
-            validation = subprocess.run(
-                [str(local_python), "-I", "-c", "pass"],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=8,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-            if validation.returncode != 0:
-                continue
+            if current not in valid_executables:
+                validation = subprocess.run(
+                    [str(local_python), "-I", "-c", "pass"],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=60,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+                if validation.returncode != 0:
+                    continue
             subprocess.Popen(
                 [
                     str(local_pythonw),

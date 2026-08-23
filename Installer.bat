@@ -19,7 +19,7 @@ if /I "%~1"=="--yes" goto ParseYes
 if /I "%~1"=="--skip-association" goto ParseSkipAssociation
 if /I "%~1"=="--test-association" goto ParseTestAssociation
 echo.
-echo   Unknown setup option.
+echo   Unknown setup option. No setup changes were made.
 echo   Supported options: --yes --no-pause --skip-association --test-association
 echo.
 exit /b 2
@@ -48,6 +48,7 @@ goto ParseArguments
 :ArgumentsReady
 
 set "ROOT=%~dp0"
+set "MAX_ROOT_LENGTH=72"
 set "APP_FILE=%ROOT%Auto Clicker.pyw"
 set "LOG=%ROOT%setup.log"
 set "RUNTIME=%ROOT%.runtime"
@@ -115,11 +116,31 @@ if not exist "%ROBOCOPY_EXE%" (
     set "FAIL_MESSAGE=Trusted Windows file-copy support is missing from the system folder."
     goto Failed
 )
+"%POWERSHELL_EXE%" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "if([IO.Path]::GetFullPath($env:ROOT).Length -gt [int]$env:MAX_ROOT_LENGTH){exit 2}" >nul 2>nul
+if errorlevel 1 (
+    set "FAIL_MESSAGE=The complete app folder path must be 72 characters or fewer. Move the extracted folder closer to the drive root and try again."
+    goto Failed
+)
 call :ValidatePrivatePaths
 if errorlevel 1 (
     set "FAIL_MESSAGE=The app folder or one of its private setup paths is not safe to modify. Extract a fresh copy to a normal folder and try again."
     goto Failed
 )
+if "%TEST_ASSOCIATION%"=="1" goto SetupApprovalReady
+cls
+echo.
+echo  ==================================================
+echo                  AUTO CLICKER SETUP
+echo  ==================================================
+echo.
+if "%ASSUME_YES%"=="1" (
+    echo   Install or repair Auto Clicker in this folder? [Y/N]: Y
+) else (
+    choice /C YN /N /M "  Install or repair Auto Clicker in this folder? [Y/N]: "
+    if errorlevel 2 goto Cancelled
+)
+
+:SetupApprovalReady
 if exist "%LOG%" del /f /q "%LOG%" >nul 2>nul
 if exist "%LOG%" (
     set "FAIL_MESSAGE=The previous setup log could not be replaced safely."
@@ -180,7 +201,7 @@ echo  ==================================================
 echo                  AUTO CLICKER SETUP
 echo  ==================================================
 echo.
-echo   The app runtime stays inside this folder.
+echo   The app and private components stay inside this folder.
 echo   A small per-user Fleece Tools launcher opens .pyw files.
 echo   Setup does not need administrator access.
 echo.
@@ -224,13 +245,6 @@ echo      Setup can place Python %PYTHON_VERSION% privately inside
 echo      this folder. It will not replace your current Python,
 echo      change PATH, install global packages, or need admin.
 echo.
-if "%ASSUME_YES%"=="1" (
-    echo      Install private Python %PYTHON_VERSION% now? [Y/N]: Y
-) else (
-    choice /C YN /N /M "      Install private Python %PYTHON_VERSION% now? [Y/N]: "
-    if errorlevel 2 goto Cancelled
-)
-
 echo.
 echo      Downloading and preparing private Python...
 call :InstallEmbedPy
@@ -332,7 +346,7 @@ echo   folder to start. You can copy the shortcut to your
 echo   Desktop or pin it to the taskbar.
 echo.
 echo   Run this installer again whenever you want to
-echo   repair the app's private local files.
+echo   repair the app's private local files or refresh the shortcut.
 echo.
 if not "%SKIP_ASSOCIATION%"=="1" (
     echo   The shared .pyw launcher and restore helper are in:
@@ -358,15 +372,13 @@ call :PauseIfNeeded
 exit /b 1
 
 :Cancelled
-set "LOG_MESSAGE=Setup cancelled by the user before private Python installation."
-call :LogCurrent
 call :ReleaseSetupLock
 echo.
 echo  ==================================================
 echo                     SETUP CANCELLED
 echo  ==================================================
 echo.
-echo   Nothing was installed outside this project folder.
+echo   Nothing was installed or changed after cancellation.
 echo   Run Installer.bat again whenever you are ready.
 echo.
 call :PauseIfNeeded
