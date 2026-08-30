@@ -13,7 +13,7 @@ from pathlib import Path
 
 
 APP_NAME = "Auto Clicker"
-APP_VERSION = "1.0.3"
+APP_VERSION = "1.0.4"
 APP_DIR = Path(__file__).resolve().parent
 RUNTIME_DIR = APP_DIR / ".runtime"
 SETTINGS_PATH = RUNTIME_DIR / "settings.ini"
@@ -107,6 +107,7 @@ try:
         QTimer,
         Qt,
         Signal,
+        Slot,
         QObject,
     )
     from PySide6.QtGui import (
@@ -825,6 +826,7 @@ def run_click_loop(
 class UiBridge(QObject):
     toggle_requested = Signal()
     stop_requested = Signal()
+    hotkey_failed = Signal(str)
     count_changed = Signal("qlonglong")
     status_changed = Signal(str)
     job_finished = Signal(str, "qlonglong", str)
@@ -885,6 +887,22 @@ class HotkeyMonitor(threading.Thread):
         self._closing.set()
 
     def run(self):
+        try:
+            self._run_hotkey_loop()
+        except BaseException as error:
+            if self._closing.is_set():
+                return
+            error_name = type(error).__name__
+            try:
+                self.bridge.hotkey_failed.emit(
+                    "The global shortcut monitor stopped unexpectedly "
+                    f"({error_name}). Use the Start and Stop buttons, then "
+                    "restart the app to restore keyboard shortcuts."
+                )
+            except RuntimeError:
+                pass
+
+    def _run_hotkey_loop(self):
         get_async_key_state = self._key_state_reader
         if get_async_key_state is None:
             if os.name != "nt":
@@ -1678,6 +1696,7 @@ class AutoClicker(QMainWindow):
         self.bridge = UiBridge()
         self.bridge.toggle_requested.connect(self.start_or_stop)
         self.bridge.stop_requested.connect(self.stop_clicking)
+        self.bridge.hotkey_failed.connect(self.hotkey_monitor_failed)
         self.bridge.count_changed.connect(self.update_count)
         self.bridge.status_changed.connect(self.status_label_text)
         self.bridge.job_finished.connect(self.job_finished)
@@ -1687,7 +1706,13 @@ class AutoClicker(QMainWindow):
         self.action_count = 0
         self.active_click_type = CLICK_ONCE
         self.hotkey_monitor = None
+        self.hotkey_available = True
         self.safety_window = None
+        self._close_pending = False
+        self._close_retry_timer = QTimer(self)
+        self._close_retry_timer.setSingleShot(True)
+        self._close_retry_timer.setInterval(50)
+        self._close_retry_timer.timeout.connect(self.close)
 
         QApplication.instance().setStyleSheet(APP_STYLE)
         self.build_ui()
@@ -2226,6 +2251,7 @@ class AutoClicker(QMainWindow):
         )
         for control in controls:
             control.setEnabled(enabled)
+        self.hotkey_button.setEnabled(enabled and self.hotkey_available)
         self.topmost_checkbox.setEnabled(enabled)
         self.sync_dynamic_controls()
 
@@ -2357,11 +2383,17 @@ class AutoClicker(QMainWindow):
             f"{message} {actions:,} {action_name}"
             f"{'s' if actions != 1 else ''} completed."
         )
-        self.worker_thread = None
         self.worker_stop = None
 
     def status_label_text(self, text):
         self.status_label.setText(text)
+
+    @Slot(str)
+    def hotkey_monitor_failed(self, message):
+        self.hotkey_available = False
+        self.hotkey_button.setEnabled(False)
+        self.status_label.setText("Keyboard shortcut unavailable")
+        self.append_log(message)
 
     def update_count(self, count):
         self.action_count = count
@@ -2383,19 +2415,30 @@ class AutoClicker(QMainWindow):
         self.safety_window.activateWindow()
 
     def closeEvent(self, event: QCloseEvent):
-        if self.running and not native_question(
+        if self.running and not self._close_pending and not native_question(
             "Auto Clicker is active. Stop clicking and close?",
             owner=self.winId(),
         ):
             event.ignore()
             return
+        self._close_pending = True
         if self.worker_stop is not None:
             self.worker_stop.set()
         if self.hotkey_monitor is not None:
             self.hotkey_monitor.close()
-            self.hotkey_monitor.join(timeout=1.0)
-        if self.worker_thread is not None:
-            self.worker_thread.join(timeout=1.5)
+        hotkey_alive = bool(
+            self.hotkey_monitor is not None and self.hotkey_monitor.is_alive()
+        )
+        worker_alive = bool(
+            self.worker_thread is not None and self.worker_thread.is_alive()
+        )
+        if hotkey_alive or worker_alive:
+            self.status_label.setText("Stopping safely before closing…")
+            event.ignore()
+            if not self._close_retry_timer.isActive():
+                self._close_retry_timer.start()
+            return
+        self._close_retry_timer.stop()
         self.save_preferences()
         self._settings_sync_timer.stop()
         self.settings.sync()
@@ -2763,6 +2806,27 @@ def run_self_test(output_dir):
     assert not hotkey_probe.is_alive()
     checks.append("F8 directly stops an active worker without Qt event delivery")
 
+    hotkey_failures = []
+
+    def broken_key_state(_key):
+        raise OSError("deterministic hotkey monitor failure")
+
+    failing_hotkey_bridge = UiBridge()
+    failing_hotkey_bridge.hotkey_failed.connect(hotkey_failures.append)
+    failing_hotkey = HotkeyMonitor(
+        failing_hotkey_bridge,
+        DEFAULT_HOTKEY_VK,
+        0,
+        key_state_reader=broken_key_state,
+    )
+    failing_hotkey.start()
+    failing_hotkey.join(timeout=0.5)
+    QApplication.processEvents()
+    assert not failing_hotkey.is_alive()
+    assert len(hotkey_failures) == 1
+    assert "OSError" in hotkey_failures[0]
+    checks.append("hotkey monitor failures degrade safely and report through the UI bridge")
+
     capture = HotkeyCaptureButton()
     captured = []
     capture.changed.connect(
@@ -3008,6 +3072,30 @@ def run_self_test(output_dir):
     startup_window.testing = True
     startup_window.close()
     checks.append("worker thread start failure fully rolls back the UI")
+
+    class ClosingWorkerProbe:
+        def __init__(self):
+            self.alive = True
+
+        def is_alive(self):
+            return self.alive
+
+    close_settings_path = output_dir / "close-safety-settings-test.ini"
+    close_window = AutoClicker(testing=True, settings_path=close_settings_path)
+    close_probe = ClosingWorkerProbe()
+    close_window.worker_thread = close_probe
+    close_window.worker_stop = threading.Event()
+    first_close = QCloseEvent()
+    close_window.closeEvent(first_close)
+    assert not first_close.isAccepted()
+    assert close_window.worker_stop.is_set()
+    assert close_window._close_retry_timer.isActive()
+    close_probe.alive = False
+    second_close = QCloseEvent()
+    close_window.closeEvent(second_close)
+    assert second_close.isAccepted()
+    assert not close_window._close_retry_timer.isActive()
+    checks.append("window stays open until the click worker has stopped")
 
     marker = output_dir / "self-test-passed.txt"
     marker.write_text("\n".join(checks) + "\n", encoding="utf-8")
