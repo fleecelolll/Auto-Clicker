@@ -115,6 +115,10 @@ if not exist "%ROBOCOPY_EXE%" (
     set "FAIL_MESSAGE=Trusted Windows file-copy support is missing from the system folder."
     goto Failed
 )
+if not exist "%ROOT%LICENSE" (
+    set "FAIL_MESSAGE=The bundled Tool License is missing from this folder. Extract a fresh official release and try again."
+    goto Failed
+)
 "%POWERSHELL_EXE%" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "if([IO.Path]::GetFullPath($env:ROOT).Length -gt [int]$env:MAX_ROOT_LENGTH){exit 2}" >nul 2>nul
 if errorlevel 1 (
     set "FAIL_MESSAGE=The complete app folder path must be 72 characters or fewer. Move the extracted folder closer to the drive root and try again."
@@ -131,6 +135,10 @@ echo      PySide6                the app window
 echo.
 echo   Keep this window open until every check passes.
 echo   The first setup can take a few minutes.
+echo.
+echo   Continue only if you accept the Terms and bundled Tool License.
+echo   Terms: https://fleece.lol/terms
+echo   Tool License: LICENSE in this folder
 echo.
 echo  ==================================================
 echo.

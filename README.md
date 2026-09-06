@@ -31,7 +31,7 @@ A little tool I made with AI to automate mouse clicking locally on 64-bit Window
 1. Download the latest release ZIP.
 2. Extract the complete folder.
 3. Double-click `Installer.bat`.
-4. Press **Y** once to approve setup.
+4. Press **Y** once to accept the Terms and bundled Tool License and approve setup.
 5. Leave the setup window open until every check passes.
 6. Double-click the `Auto Clicker` shortcut created in the folder.
 
@@ -72,9 +72,9 @@ If the `Auto Clicker` shortcut does not open, run `Installer.bat` again and keep
 
 If a keyboard shortcut is already reserved by Windows or another app, choose a different combination. F8 always remains the emergency stop.
 
-## source use
+## license
 
-The source is public for transparency and security review. Copyright 2026 Fleece. All rights reserved. No permission is granted to use, copy, modify, redistribute, sell, or publish derivative versions. See [LICENSE](LICENSE).
+Copyright 2026 Fleece. This project is source-available, not open source. The bundled [LICENSE](LICENSE) permits downloading, installing, and running an unmodified official release for lawful personal, non-commercial use. Modification, redistribution, sale, rebranding, and derivative versions remain prohibited. Third-party materials retain their own licenses.
 
 ## note
 

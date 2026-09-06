@@ -7,7 +7,7 @@ INSTALL
 1. Download the latest release ZIP.
 2. Extract the complete folder.
 3. Double-click Installer.bat.
-4. Press Y once to approve setup.
+4. Press Y once to accept the Terms and bundled Tool License and approve setup.
 5. Leave the setup window open until every check passes.
 6. Double-click the Auto Clicker shortcut created in the folder.
 
@@ -38,8 +38,8 @@ If setup or the shortcut fails, review setup.log and run Installer.bat again. Su
 
 If a keyboard shortcut is reserved by Windows or another app, choose a different combination. F8 always remains the emergency stop.
 
-SOURCE USE
+LICENSE
 
-Copyright 2026 Fleece. All rights reserved. The source is public only for transparency and security review. No permission is granted to copy, modify, redistribute, sell, or publish derivative versions. See LICENSE.
+Copyright 2026 Fleece. This project is source-available, not open source. The bundled LICENSE permits downloading, installing, and running an unmodified official release for lawful personal, non-commercial use. Modification, redistribution, sale, rebranding, and derivative versions remain prohibited. Third-party materials retain their own licenses.
 
 This project was made with AI. Only automate clicking where you have permission. Keep F8 available, especially when using high rates or a fixed position.
