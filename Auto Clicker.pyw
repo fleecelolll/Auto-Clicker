@@ -13,7 +13,7 @@ from pathlib import Path
 
 
 APP_NAME = "Auto Clicker"
-APP_VERSION = "1.0.4"
+APP_VERSION = "1.0.5"
 APP_DIR = Path(__file__).resolve().parent
 RUNTIME_DIR = APP_DIR / ".runtime"
 SETTINGS_PATH = RUNTIME_DIR / "settings.ini"
@@ -2465,6 +2465,9 @@ def run_self_test(output_dir):
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     checks = []
+
+    assert APP_VERSION == "1.0.5"
+    checks.append("release version")
 
     values = {
         "rate_mode": RATE_CPS,
