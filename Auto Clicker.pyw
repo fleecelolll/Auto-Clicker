@@ -13,13 +13,11 @@ from pathlib import Path
 
 
 APP_NAME = "Auto Clicker"
-APP_VERSION = "1.0.7"
+APP_VERSION = "1.0.8"
 APP_DIR = Path(__file__).resolve().parent
 RUNTIME_DIR = APP_DIR / ".runtime"
 SETTINGS_PATH = RUNTIME_DIR / "settings.ini"
 SETUP_LOCK_DIR = RUNTIME_DIR / "setup.lock"
-VENV_PYTHON = APP_DIR / ".venv" / "Scripts" / "python.exe"
-VENV_PYTHONW = APP_DIR / ".venv" / "Scripts" / "pythonw.exe"
 EMBEDDED_PYTHON = RUNTIME_DIR / "python" / "python.exe"
 EMBEDDED_PYTHONW = RUNTIME_DIR / "python" / "pythonw.exe"
 APP_MUTEX_NAMES = (
@@ -46,44 +44,37 @@ def native_question(message, title=APP_NAME, owner=None):
 
 def bootstrap_local_python():
     current = os.path.normcase(os.path.realpath(sys.executable))
-    for local_python, local_pythonw in (
-        (VENV_PYTHON, VENV_PYTHONW),
-        (EMBEDDED_PYTHON, EMBEDDED_PYTHONW),
-    ):
-        valid_executables = {
-            os.path.normcase(os.path.realpath(path))
-            for path in (local_python, local_pythonw)
-            if path.is_file()
-        }
-        if current in valid_executables and sys.flags.isolated:
-            return
-        if not local_python.is_file() or not local_pythonw.is_file():
-            continue
+    valid_executables = {
+        os.path.normcase(os.path.realpath(path))
+        for path in (EMBEDDED_PYTHON, EMBEDDED_PYTHONW)
+        if path.is_file()
+    }
+    if current in valid_executables and sys.flags.isolated:
+        return
+    if EMBEDDED_PYTHON.is_file() and EMBEDDED_PYTHONW.is_file():
         try:
-            if current not in valid_executables:
-                validation = subprocess.run(
-                    [str(local_python), "-I", "-c", "pass"],
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    timeout=60,
-                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-                )
-                if validation.returncode != 0:
-                    continue
-            subprocess.Popen(
-                [
-                    str(local_pythonw),
-                    "-I",
-                    str(Path(__file__).resolve()),
-                    *sys.argv[1:],
-                ],
-                cwd=str(APP_DIR),
+            validation = subprocess.run(
+                [str(EMBEDDED_PYTHON), "-I", "-c", "pass"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=60,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
+            if validation.returncode == 0:
+                subprocess.Popen(
+                    [
+                        str(EMBEDDED_PYTHONW),
+                        "-I",
+                        str(Path(__file__).resolve()),
+                        *sys.argv[1:],
+                    ],
+                    cwd=str(APP_DIR),
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+                raise SystemExit(0)
         except (OSError, subprocess.SubprocessError):
-            continue
-        raise SystemExit(0)
+            pass
 
     show_native_error(
         "Setup is missing, incomplete, or no longer usable.\n\n"
@@ -425,7 +416,6 @@ LEGACY_HOTKEYS = {
     "F11": 0x7A,
     "F12": 0x7B,
 }
-EMERGENCY_HOTKEY = "F8"
 EMERGENCY_VK = 0x77
 DEFAULT_HOTKEY_VK = LEGACY_HOTKEYS["F6"]
 HOTKEY_CTRL = 0x01
@@ -2466,7 +2456,7 @@ def run_self_test(output_dir):
     output_dir.mkdir(parents=True, exist_ok=True)
     checks = []
 
-    assert APP_VERSION == "1.0.7"
+    assert APP_VERSION == "1.0.8"
     checks.append("release version")
 
     values = {
