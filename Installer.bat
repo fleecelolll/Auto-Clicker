@@ -130,7 +130,7 @@ echo   Keep this window open until every check passes.
 echo   The first setup can take a few minutes.
 echo.
 echo   Continue only if you accept the Terms and bundled Tool License.
-echo   Terms: https://fleece.lol/terms
+echo   Terms: https://fleece.wtf/terms
 echo   Tool License: LICENSE in this folder
 echo.
 echo  ==================================================
