@@ -6,6 +6,7 @@ actual Windows SendInput path and verifies the target receives the clicks.
 
 import importlib.machinery
 import importlib.util
+import ctypes
 import os
 from pathlib import Path
 import sys
@@ -40,6 +41,7 @@ class ClickTarget(QWidget):
         self.received = 0
         self.setWindowTitle("Fleece disposable click target")
         self.setAttribute(Qt.WA_NativeWindow)
+        self.setWindowFlag(Qt.WindowStaysOnTopHint)
         self.resize(260, 180)
 
     def mousePressEvent(self, event):
@@ -66,19 +68,58 @@ target.activateWindow()
 application.processEvents()
 
 user32 = module.NATIVE_USER32
-user32.SetForegroundWindow.argtypes = (module.wintypes.HWND,)
-user32.SetForegroundWindow.restype = module.wintypes.BOOL
-user32.GetForegroundWindow.argtypes = ()
-user32.GetForegroundWindow.restype = module.wintypes.HWND
+user32.WindowFromPoint.argtypes = (module.wintypes.POINT,)
+user32.WindowFromPoint.restype = module.wintypes.HWND
+user32.GetClientRect.argtypes = (
+    module.wintypes.HWND,
+    ctypes.POINTER(module.wintypes.RECT),
+)
+user32.GetClientRect.restype = module.wintypes.BOOL
+user32.ScreenToClient.argtypes = (
+    module.wintypes.HWND,
+    ctypes.POINTER(module.wintypes.POINT),
+)
+user32.ScreenToClient.restype = module.wintypes.BOOL
 handle = int(target.winId())
-user32.SetForegroundWindow(handle)
-if int(user32.GetForegroundWindow()) != handle:
-    target.close()
-    raise AssertionError("The disposable target could not be made foreground; refusing to send clicks.")
-
 point = target.mapToGlobal(QPoint(target.width() // 2, target.height() // 2))
-mouse = module.WindowsMouseController()
-if not mouse.virtual_screen_contains(point.x(), point.y()):
+click_point = (point.x(), point.y())
+click_lock = threading.Lock()
+
+
+def assert_target_at_cursor(mouse):
+    """A real SendInput click is safe only while it hit-tests to our widget."""
+    cursor = mouse.cursor_position()
+    if cursor != click_point:
+        raise AssertionError(f"Cursor moved away from the disposable target: {cursor}.")
+    client = module.wintypes.RECT()
+    local = module.wintypes.POINT(*cursor)
+    if not user32.GetClientRect(handle, ctypes.byref(client)) or not user32.ScreenToClient(
+        handle, ctypes.byref(local)
+    ):
+        raise AssertionError("Could not verify the disposable target's client rectangle.")
+    if not (client.left <= local.x < client.right and client.top <= local.y < client.bottom):
+        raise AssertionError("The click point is outside the disposable target's client area.")
+    hit = int(user32.WindowFromPoint(module.wintypes.POINT(*cursor)) or 0)
+    if hit != handle:
+        raise AssertionError(
+            f"The disposable target does not own the click point (target={handle:#x}, hit={hit:#x}); refusing to send clicks."
+        )
+
+
+class GuardedMouseController(module.WindowsMouseController):
+    def prepare_click(self, button, double_click=False):
+        send_click = super().prepare_click(button, double_click)
+
+        def send_only_to_target():
+            with click_lock:
+                assert_target_at_cursor(self)
+                send_click()
+
+        return send_only_to_target
+
+
+mouse = GuardedMouseController()
+if not mouse.virtual_screen_contains(*click_point):
     target.close()
     raise AssertionError("The disposable target is outside the virtual screen.")
 prior_position = mouse.cursor_position()
@@ -92,22 +133,26 @@ values = {
     "start_delay": "0",
     "variation_percent": "0",
     "target_mode": module.TARGET_FIXED,
-    "target_x": str(point.x()),
-    "target_y": str(point.y()),
+    "target_x": str(click_point[0]),
+    "target_y": str(click_point[1]),
 }
 config = module.build_config(values)
 outcome = {}
+stop_event = threading.Event()
 
 
 def run():
     try:
-        outcome["result"] = module.run_click_job(config, threading.Event(), mouse)
+        outcome["result"] = module.run_click_job(config, stop_event, mouse)
     except BaseException as error:
         outcome["error"] = error
 
 
 worker = threading.Thread(target=run, name="FleeceRepresentativeClick", daemon=True)
 try:
+    mouse.move_to(*click_point)
+    application.processEvents()
+    assert_target_at_cursor(mouse)
     worker.start()
     deadline = time.monotonic() + 12
     while worker.is_alive() and time.monotonic() < deadline:
@@ -126,6 +171,12 @@ try:
         )
     print("Real Windows SendInput -> disposable Qt target: 3 of 3 clicks received.")
 finally:
-    mouse.move_to(*prior_position)
-    target.close()
+    stop_event.set()
+    if worker.ident is not None:
+        worker.join(timeout=2)
+    with click_lock:
+        try:
+            mouse.move_to(*prior_position)
+        finally:
+            target.close()
     application.processEvents()
