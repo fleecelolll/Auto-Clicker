@@ -114,6 +114,25 @@ kernel32.ProcessIdToSessionId.restype = module.wintypes.BOOL
 kernel32.WTSGetActiveConsoleSessionId.argtypes = ()
 kernel32.WTSGetActiveConsoleSessionId.restype = module.wintypes.DWORD
 handle = int(target.winId())
+# Native topmost placement can raise our fixture above a runner shell overlay
+# without requiring foreground activation. The hit-test below remains mandatory.
+SWP_SHOWWINDOW = 0x0040
+ctypes.set_last_error(0)
+if not user32.SetWindowPos(
+    module.wintypes.HWND(handle),
+    module.HWND_TOPMOST,
+    0,
+    0,
+    0,
+    0,
+    module.TOPMOST_POSITION_FLAGS | SWP_SHOWWINDOW,
+):
+    target.close()
+    error_code = ctypes.get_last_error()
+    if error_code:
+        raise ctypes.WinError(error_code)
+    raise AssertionError("Could not show the disposable target as a topmost window.")
+application.processEvents()
 point = target.mapToGlobal(QPoint(target.width() // 2, target.height() // 2))
 click_point = (point.x(), point.y())
 click_lock = threading.Lock()
