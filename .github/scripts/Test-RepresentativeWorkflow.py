@@ -80,10 +80,74 @@ user32.ScreenToClient.argtypes = (
     ctypes.POINTER(module.wintypes.POINT),
 )
 user32.ScreenToClient.restype = module.wintypes.BOOL
+user32.GetAncestor.argtypes = (module.wintypes.HWND, module.wintypes.UINT)
+user32.GetAncestor.restype = module.wintypes.HWND
+user32.GetWindowThreadProcessId.argtypes = (
+    module.wintypes.HWND,
+    ctypes.POINTER(module.wintypes.DWORD),
+)
+user32.GetWindowThreadProcessId.restype = module.wintypes.DWORD
+user32.GetClassNameW.argtypes = (
+    module.wintypes.HWND,
+    module.wintypes.LPWSTR,
+    ctypes.c_int,
+)
+user32.GetClassNameW.restype = ctypes.c_int
+user32.GetThreadDesktop.argtypes = (module.wintypes.DWORD,)
+user32.GetThreadDesktop.restype = module.wintypes.HANDLE
+user32.GetUserObjectInformationW.argtypes = (
+    module.wintypes.HANDLE,
+    ctypes.c_int,
+    ctypes.c_void_p,
+    module.wintypes.DWORD,
+    ctypes.POINTER(module.wintypes.DWORD),
+)
+user32.GetUserObjectInformationW.restype = module.wintypes.BOOL
+kernel32 = module.NATIVE_KERNEL32
+kernel32.GetCurrentThreadId.argtypes = ()
+kernel32.GetCurrentThreadId.restype = module.wintypes.DWORD
+kernel32.ProcessIdToSessionId.argtypes = (
+    module.wintypes.DWORD,
+    ctypes.POINTER(module.wintypes.DWORD),
+)
+kernel32.ProcessIdToSessionId.restype = module.wintypes.BOOL
+kernel32.WTSGetActiveConsoleSessionId.argtypes = ()
+kernel32.WTSGetActiveConsoleSessionId.restype = module.wintypes.DWORD
 handle = int(target.winId())
 point = target.mapToGlobal(QPoint(target.width() // 2, target.height() // 2))
 click_point = (point.x(), point.y())
 click_lock = threading.Lock()
+
+
+def hit_diagnostics(hit):
+    """Report only window structure and session state, never window titles."""
+    try:
+        owner = module.wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hit, ctypes.byref(owner))
+        root = int(user32.GetAncestor(hit, 2) or 0)  # GA_ROOT
+        window_class = ctypes.create_unicode_buffer(128)
+        user32.GetClassNameW(hit, window_class, len(window_class))
+        desktop = user32.GetThreadDesktop(kernel32.GetCurrentThreadId())
+        receives_input = module.wintypes.BOOL()
+        needed = module.wintypes.DWORD()
+        has_input_state = bool(
+            desktop
+            and user32.GetUserObjectInformationW(
+                desktop, 6, ctypes.byref(receives_input), ctypes.sizeof(receives_input), ctypes.byref(needed)
+            )
+        )  # UOI_IO
+        session = module.wintypes.DWORD()
+        has_session = bool(kernel32.ProcessIdToSessionId(os.getpid(), ctypes.byref(session)))
+        console_session = kernel32.WTSGetActiveConsoleSessionId()
+        return (
+            f" hit_root={root:#x}, hit_same_process={owner.value == os.getpid()},"
+            f" hit_class={window_class.value!r}, desktop_receives_input="
+            f"{bool(receives_input.value) if has_input_state else 'unknown'},"
+            f" process_session={session.value if has_session else 'unknown'},"
+            f" console_session={console_session}"
+        )
+    except Exception as error:
+        return f" diagnostics_unavailable={type(error).__name__}"
 
 
 def assert_target_at_cursor(mouse):
@@ -102,7 +166,8 @@ def assert_target_at_cursor(mouse):
     hit = int(user32.WindowFromPoint(module.wintypes.POINT(*cursor)) or 0)
     if hit != handle:
         raise AssertionError(
-            f"The disposable target does not own the click point (target={handle:#x}, hit={hit:#x}); refusing to send clicks."
+            f"The disposable target does not own the click point (target={handle:#x}, hit={hit:#x});"
+            f" refusing to send clicks.{hit_diagnostics(hit)}"
         )
 
 
