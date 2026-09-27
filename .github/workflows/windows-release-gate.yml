@@ -35,13 +35,61 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Perform a clean private setup and app self-test through the confirmation prompt
-        shell: cmd
-        run: echo Y| call Installer.bat --no-pause
+      - name: Build the canonical ZIP and test predownload failures from its extracted files
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'Auto-Clicker-v1.0.10.zip'
+          $release = Join-Path $env:RUNNER_TEMP 'Auto release space'
+          if ($release.Length -gt 72) { throw 'The test release path exceeds the supported limit.' }
+          & ./scripts/Build-ReleaseZip.ps1 -OutputPath $archive
+          Expand-Archive -LiteralPath $archive -DestinationPath $release
+          & ./.github/scripts/Test-ReleasePreflight.ps1 -ReleaseRoot $release
 
-      - name: Verify the repair path against the installed runtime
-        shell: cmd
-        run: Installer.bat --yes --no-pause
+      - name: Perform clean private setup from the exact ZIP through the confirmation prompt
+        shell: pwsh
+        run: |
+          $release = Join-Path $env:RUNNER_TEMP 'Auto release space'
+          Push-Location -LiteralPath $release
+          try {
+            & $env:ComSpec /d /c 'echo Y| call "Installer.bat" --no-pause'
+            if ($LASTEXITCODE -ne 0) { throw "Clean setup failed with exit code $LASTEXITCODE" }
+          } finally { Pop-Location }
+
+      - name: Verify repair, shortcut, self-test, and ARM real-click workflow
+        shell: pwsh
+        run: |
+          $release = Join-Path $env:RUNNER_TEMP 'Auto release space'
+          Push-Location -LiteralPath $release
+          try {
+            & $env:ComSpec /d /c 'call "Installer.bat" --yes --no-pause'
+            if ($LASTEXITCODE -ne 0) { throw "Repair failed with exit code $LASTEXITCODE" }
+          } finally { Pop-Location }
+          $shell = New-Object -ComObject WScript.Shell
+          $shortcut = $shell.CreateShortcut((Join-Path $release 'Auto Clicker.lnk'))
+          $runtime = Join-Path $release '.runtime\python'
+          $expectedTarget = Join-Path $runtime 'pythonw.exe'
+          $expectedArguments = '-I "' + (Join-Path $release 'Auto Clicker.pyw') + '"'
+          if ([IO.Path]::GetFullPath($shortcut.TargetPath).TrimEnd('\') -ine [IO.Path]::GetFullPath($expectedTarget).TrimEnd('\') -or $shortcut.Arguments -cne $expectedArguments -or [IO.Path]::GetFullPath($shortcut.WorkingDirectory).TrimEnd('\') -ine [IO.Path]::GetFullPath($release).TrimEnd('\')) {
+            throw 'The release shortcut does not launch the expected private app.'
+          }
+          $checks = Join-Path $env:RUNNER_TEMP 'auto-representative-checks'
+          & (Join-Path $runtime 'python.exe') -I (Join-Path $release 'Auto Clicker.pyw') --self-test $checks
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath (Join-Path $checks 'self-test-passed.txt') -PathType Leaf)) {
+            throw 'The offline self-test did not pass.'
+          }
+          $launched = Start-Process -FilePath $shortcut.TargetPath -ArgumentList $shortcut.Arguments -WorkingDirectory $shortcut.WorkingDirectory -WindowStyle Hidden -PassThru
+          try {
+            Start-Sleep -Seconds 3
+            $launched.Refresh()
+            if ($launched.HasExited) { throw 'The release shortcut app exited immediately.' }
+          } finally {
+            if (-not $launched.HasExited) { Stop-Process -Id $launched.Id -Force }
+          }
+          if ('${{ matrix.runner }}' -eq 'windows-11-arm') {
+            $env:QT_QPA_PLATFORM = 'windows'
+            & (Join-Path $runtime 'python.exe') -I (Join-Path $env:GITHUB_WORKSPACE '.github\scripts\Test-RepresentativeWorkflow.py') $release
+            if ($LASTEXITCODE -ne 0) { throw 'The real disposable-target click workflow failed.' }
+          }
 
       - name: Upload diagnostics if a gate fails
         if: failure()
@@ -52,6 +100,6 @@ jobs:
           include-hidden-files: true
           retention-days: 7
           path: |
-            setup.log
-            .runtime/error.log
-            .runtime/logs/*.log
+            ${{ runner.temp }}/Auto release space/setup.log
+            ${{ runner.temp }}/Auto release space/.runtime/error.log
+            ${{ runner.temp }}/Auto release space/.runtime/logs/*.log
