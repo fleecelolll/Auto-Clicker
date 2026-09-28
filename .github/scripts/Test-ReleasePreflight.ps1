@@ -6,7 +6,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 3
 $source = [IO.Path]::GetFullPath($ReleaseRoot).TrimEnd('\')
-$files = @('Auto Clicker.pyw', 'Installer.bat', 'LICENSE', 'READ ME.txt')
+$files = @('Auto Clicker.pyw', 'Installer.bat', 'LICENSE', 'READ ME.txt', 'requirements-win-x64.txt', 'requirements-win-arm64.txt')
 $base = Join-Path ([IO.Path]::GetTempPath()) ('f' + [Guid]::NewGuid().ToString('N').Substring(0, 6))
 if ($base.Length -gt 60) { throw "The test fixture root is too long: $base" }
 [IO.Directory]::CreateDirectory($base) | Out-Null
