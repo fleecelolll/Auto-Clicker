@@ -39,9 +39,15 @@ Keep the full extracted folder path at 72 characters or fewer so Windows can ins
 
 Setup keeps the private Python runtime, dependencies, settings, and every app component inside the extracted folder. It does not require administrator access, change PATH, or install global Python packages. The generated folder-local shortcut starts the app directly with that private runtime, so Microsoft Store or system Python is not required.
 
-Setup pins and verifies official Python 3.14.7, pip, and PySide6-Essentials. Downloaded runtime archives are checked against pinned SHA-256 hashes before use.
+Setup pins and verifies official Python 3.14.7, pip, and PySide6-Essentials. Downloaded runtime archives and the complete PyPI wheel dependency set are checked against pinned SHA-256 hashes before use. Setup automatically selects the bundled x64 or ARM64 requirements file; keep both files with the extracted release.
 
 Run `Installer.bat` again to repair the private components or after moving the complete folder. Setup preserves saved clicking preferences and recreates the shortcut for the folder's current location.
+
+## 1.0.11 security update
+
+- Require reviewed SHA-256 hashes for every Python dependency download during setup and repair.
+- Include complete architecture-specific dependency lock files in the release ZIP.
+- Keep the same UI, dependency versions, public download, and folder-local setup process.
 
 ## usage
 

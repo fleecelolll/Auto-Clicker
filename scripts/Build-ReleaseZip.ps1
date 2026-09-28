@@ -57,9 +57,9 @@ try {
         throw "The archive filename must be Auto-Clicker-v$version.zip."
     }
 
-    $fixed = @('Auto Clicker.pyw', 'Installer.bat', 'LICENSE', 'READ ME.txt')
+    $fixed = @('Auto Clicker.pyw', 'Installer.bat', 'LICENSE', 'READ ME.txt', 'requirements-win-x64.txt', 'requirements-win-arm64.txt')
     $paths = @($fixed | Sort-Object -CaseSensitive)
-    if ($paths.Count -ne 4 -or (@($paths | Select-Object -Unique)).Count -ne 4) {
+    if ($paths.Count -ne 6 -or (@($paths | Select-Object -Unique)).Count -ne 6) {
         throw 'The release file list is incomplete or contains duplicates.'
     }
     $committed = @{}
