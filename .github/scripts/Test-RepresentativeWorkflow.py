@@ -14,6 +14,76 @@ import threading
 import time
 
 
+def placement_candidates(available, size):
+    """Place only our fixture, inside the available screen and away from overlays."""
+    x, y, width, height = available
+    target_width, target_height = size
+    if width < target_width or height < target_height or min(target_width, target_height) <= 0:
+        raise AssertionError("The disposable target cannot fit inside the available screen.")
+    spare_x, spare_y = width - target_width, height - target_height
+    left, right = x + min(24, spare_x // 2), x + spare_x - min(24, spare_x // 2)
+    top, bottom = y + min(24, spare_y // 2), y + spare_y - min(24, spare_y // 2)
+    center_x, center_y = x + spare_x // 2, y + spare_y // 2
+    return tuple(dict.fromkeys((
+        (center_x, center_y), (left, top), (right, top), (left, bottom), (right, bottom),
+        (center_x, top), (center_x, bottom), (left, center_y), (right, center_y),
+    )))
+
+
+def wait_for_owned_target(candidates, handle, place, probe, pump, *,
+                          clock=time.monotonic, sleep=time.sleep, timeout=10.0,
+                          placement_timeout=1.0, stable_for=0.25, poll_interval=0.02):
+    """Poll exact native ownership before moving the pointer or sending input.
+
+    Only `place` touches a window, and it is restricted to the disposable target.
+    Event pumping lets Qt finish creating/moving its native client area. Neither
+    a related HWND nor a single transient owned sample is enough to pass.
+    """
+    if (not candidates or not handle or
+            not (0 < poll_interval <= stable_for < placement_timeout <= timeout < float("inf"))):
+        raise ValueError("Readiness requires finite positive bounds and a target handle.")
+    deadline = clock() + timeout
+    index = 0
+    last_hit = 0
+    while clock() < deadline:
+        placement_deadline = min(deadline, clock() + placement_timeout)
+        place(candidates[index % len(candidates)])
+        index += 1
+        stable_point = None
+        stable_since = None
+        while clock() < placement_deadline:
+            pump()
+            point, last_hit = probe()
+            now = clock()
+            if now >= placement_deadline:
+                break
+            if last_hit == handle:
+                if point != stable_point:
+                    stable_point, stable_since = point, now
+                elif now - stable_since >= stable_for:
+                    return point
+            else:
+                stable_point = stable_since = None
+            sleep(min(poll_interval, placement_deadline - now))
+    raise AssertionError(
+        f"Disposable target did not retain exact click-point ownership within {timeout:g}s"
+        f" (target={handle:#x}, hit={last_hit:#x}, placements={index}); refusing to send clicks."
+    )
+
+
+def native_client_center(user32, handle, wintypes):
+    """Use Win32 coordinates throughout; Qt coordinates may be DPI-scaled."""
+    client = wintypes.RECT()
+    if not user32.GetClientRect(handle, ctypes.byref(client)):
+        raise AssertionError("Could not read the disposable target's native client rectangle.")
+    if client.right <= client.left or client.bottom <= client.top:
+        raise AssertionError("The disposable target has an empty native client rectangle.")
+    point = wintypes.POINT((client.left + client.right) // 2, (client.top + client.bottom) // 2)
+    if not user32.ClientToScreen(handle, ctypes.byref(point)):
+        raise AssertionError("Could not map the disposable target's native client center.")
+    return point.x, point.y
+
+
 if os.environ.get("GITHUB_ACTIONS") != "true" or os.environ.get("RUNNER_ARCH") != "ARM64":
     raise SystemExit("Real click workflow is restricted to disposable GitHub Windows ARM64 runners.")
 if os.environ.get("QT_QPA_PLATFORM", "windows").lower() != "windows":
@@ -22,7 +92,7 @@ if os.environ.get("QT_QPA_PLATFORM", "windows").lower() != "windows":
 release = Path(sys.argv[1]).resolve()
 sys.path.insert(0, str(release))
 
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QWidget
 
 
@@ -80,6 +150,11 @@ user32.ScreenToClient.argtypes = (
     ctypes.POINTER(module.wintypes.POINT),
 )
 user32.ScreenToClient.restype = module.wintypes.BOOL
+user32.ClientToScreen.argtypes = (
+    module.wintypes.HWND,
+    ctypes.POINTER(module.wintypes.POINT),
+)
+user32.ClientToScreen.restype = module.wintypes.BOOL
 user32.GetAncestor.argtypes = (module.wintypes.HWND, module.wintypes.UINT)
 user32.GetAncestor.restype = module.wintypes.HWND
 user32.GetWindowThreadProcessId.argtypes = (
@@ -114,28 +189,31 @@ kernel32.ProcessIdToSessionId.restype = module.wintypes.BOOL
 kernel32.WTSGetActiveConsoleSessionId.argtypes = ()
 kernel32.WTSGetActiveConsoleSessionId.restype = module.wintypes.DWORD
 handle = int(target.winId())
-# Native topmost placement can raise our fixture above a runner shell overlay
-# without requiring foreground activation. The hit-test below remains mandatory.
 SWP_SHOWWINDOW = 0x0040
-ctypes.set_last_error(0)
-if not user32.SetWindowPos(
-    module.wintypes.HWND(handle),
-    module.HWND_TOPMOST,
-    0,
-    0,
-    0,
-    0,
-    module.TOPMOST_POSITION_FLAGS | SWP_SHOWWINDOW,
-):
-    target.close()
-    error_code = ctypes.get_last_error()
-    if error_code:
-        raise ctypes.WinError(error_code)
-    raise AssertionError("Could not show the disposable target as a topmost window.")
-application.processEvents()
-point = target.mapToGlobal(QPoint(target.width() // 2, target.height() // 2))
-click_point = (point.x(), point.y())
+click_point = None
 click_lock = threading.Lock()
+
+
+def place_target(position):
+    # Never activate, dismiss, move, or change the Z-order of any foreign HWND.
+    target.move(*position)
+    target.raise_()
+    target.activateWindow()
+    application.processEvents()
+    ctypes.set_last_error(0)
+    if not user32.SetWindowPos(
+        module.wintypes.HWND(handle), module.HWND_TOPMOST, 0, 0, 0, 0,
+        module.TOPMOST_POSITION_FLAGS | SWP_SHOWWINDOW,
+    ):
+        error_code = ctypes.get_last_error()
+        if error_code:
+            raise ctypes.WinError(error_code)
+        raise AssertionError("Could not show the disposable target as a topmost window.")
+
+
+def probe_target():
+    point = native_client_center(user32, handle, module.wintypes)
+    return point, int(user32.WindowFromPoint(module.wintypes.POINT(*point)) or 0)
 
 
 def hit_diagnostics(hit):
@@ -203,24 +281,7 @@ class GuardedMouseController(module.WindowsMouseController):
 
 
 mouse = GuardedMouseController()
-if not mouse.virtual_screen_contains(*click_point):
-    target.close()
-    raise AssertionError("The disposable target is outside the virtual screen.")
 prior_position = mouse.cursor_position()
-values = {
-    "rate_mode": module.RATE_CPS,
-    "rate_value": "1",
-    "button": "Left",
-    "click_type": module.CLICK_ONCE,
-    "repeat_mode": module.REPEAT_COUNT,
-    "repeat_value": "3",
-    "start_delay": "0",
-    "variation_percent": "0",
-    "target_mode": module.TARGET_FIXED,
-    "target_x": str(click_point[0]),
-    "target_y": str(click_point[1]),
-}
-config = module.build_config(values)
 outcome = {}
 stop_event = threading.Event()
 
@@ -234,6 +295,42 @@ def run():
 
 worker = threading.Thread(target=run, name="FleeceRepresentativeClick", daemon=True)
 try:
+    frame = target.frameGeometry()
+    candidates = placement_candidates(
+        (rect.x(), rect.y(), rect.width(), rect.height()), (frame.width(), frame.height()),
+    )
+    print(
+        f"Waiting at most 10s for disposable native target ownership:"
+        f" {len(candidates)} own placements, Qt scale={screen.devicePixelRatio():g}."
+    )
+    try:
+        click_point = wait_for_owned_target(
+            candidates, handle, place_target, probe_target, application.processEvents,
+        )
+    except AssertionError as error:
+        try:
+            _point, hit = probe_target()
+            details = hit_diagnostics(hit)
+        except Exception as diagnostic_error:
+            details = f" diagnostics_unavailable={type(diagnostic_error).__name__}"
+        raise AssertionError(f"{error}{details}") from error
+    if not mouse.virtual_screen_contains(*click_point):
+        raise AssertionError("The disposable target is outside the virtual screen.")
+    print(f"Disposable native target ready at {click_point}; exact ownership stable for 250 ms.")
+    values = {
+        "rate_mode": module.RATE_CPS,
+        "rate_value": "1",
+        "button": "Left",
+        "click_type": module.CLICK_ONCE,
+        "repeat_mode": module.REPEAT_COUNT,
+        "repeat_value": "3",
+        "start_delay": "0",
+        "variation_percent": "0",
+        "target_mode": module.TARGET_FIXED,
+        "target_x": str(click_point[0]),
+        "target_y": str(click_point[1]),
+    }
+    config = module.build_config(values)
     mouse.move_to(*click_point)
     application.processEvents()
     assert_target_at_cursor(mouse)
