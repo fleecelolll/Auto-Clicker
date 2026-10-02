@@ -1,5 +1,12 @@
 AUTO CLICKER
 
+AUDIT UPDATE v1.0.12
+Shared setup: extract the complete official ZIP, run Installer.bat, accept the
+bundled Terms/Tool License, wait for every final check, then use the folder-local
+shortcut. Setup needs no administrator access and keeps Python private.
+Run setup again to repair or refresh a moved shortcut. Keep the complete folder
+path at most 72 characters and do not use percent signs in its name.
+
 A little tool I made with AI to automate mouse clicking locally on 64-bit Windows.
 
 INSTALL
@@ -19,6 +26,12 @@ USE
 2. Click the shortcut box and press a key combination to change it.
 3. Press Start clicking or the saved keyboard shortcut.
 4. Press the same shortcut to stop, or press F8 for the emergency stop.
+
+One-click mode allows at most 500 clicks per second; double-click mode allows
+at most 250 double-click actions per second. Actual delivery depends on
+Windows, the target app, and the computer. Test a low rate first, especially
+at a saved position. Random timing cannot exceed these caps. The activity
+view retains the latest 500 lines.
 
 SETUP DETAILS
 
@@ -42,7 +55,17 @@ It compiles source before downloading app packages. Success is shown only
 after dependencies, offline self-tests, and the shortcut all pass. Keep the
 complete extracted folder together.
 
-If a keyboard shortcut is reserved by Windows or another app, choose a different combination. F8 always remains the emergency stop.
+If a keyboard shortcut is reserved by Windows or another app, choose a
+different combination. F8 is the fixed emergency stop while the keyboard
+monitor is working. If that monitor fails, clicking stops and new jobs are
+blocked. Restart the app to restore keyboard shortcuts.
+
+OFFLINE REGRESSION CHECKS
+
+Run .runtime\python\python.exe -I scripts\Test-AppSafety.py from this folder.
+The suite uses fake mouse input and offscreen Qt; it never clicks the desktop.
+Use --report PATH to save measurements as JSON. Timing budgets detect
+regressions and do not guarantee performance on another computer.
 
 LICENSE
 

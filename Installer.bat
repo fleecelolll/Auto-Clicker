@@ -47,7 +47,7 @@ set "SETUP_CHILD_ARGS=--fleece-setup-child"
 if "%ASSUME_YES%"=="1" set "SETUP_CHILD_ARGS=%SETUP_CHILD_ARGS% --yes"
 if "%NO_PAUSE%"=="1" set "SETUP_CHILD_ARGS=%SETUP_CHILD_ARGS% --no-pause"
 set "FLEECE_TOOLS_INSTALLER_CHILD=1"
-"%SystemRoot%\System32\cmd.exe" /d /c call "%INSTALLER_SELF%" %SETUP_CHILD_ARGS%
+"%SystemRoot%\System32\cmd.exe" /d /v:on /s /c ""!INSTALLER_SELF!" %SETUP_CHILD_ARGS%"
 exit /b %ERRORLEVEL%
 
 :DedicatedChildReady
@@ -110,6 +110,12 @@ if not exist "%POWERSHELL_EXE%" (
 if not exist "%ROBOCOPY_EXE%" (
     set "FAIL_MESSAGE=Trusted Windows file-copy support is missing from the system folder."
     set "REPAIR_HINT=Run Windows Update or Windows system-file repair, then retry. Do not download Robocopy from an unofficial site."
+    goto Failed
+)
+"%POWERSHELL_EXE%" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "if($env:ROOT.IndexOf([char]37) -ge 0){exit 2}" >nul 2>nul
+if errorlevel 1 (
+    set "FAIL_MESSAGE=The app folder path cannot contain percent signs because Windows shortcuts expand environment variables."
+    set "REPAIR_HINT=Rename the extracted folder or move it to a normal local path without percent signs, then run Installer.bat again."
     goto Failed
 )
 if not exist "%ROOT%LICENSE" (
@@ -232,11 +238,18 @@ if errorlevel 1 (
 echo      App source and shortcut support are ready.
 
 echo.
+call :CheckDependencyLock
+if errorlevel 1 (
+    set "FAIL_MESSAGE=The reviewed dependency lock is missing, unsafe, or changed."
+    set "REPAIR_HINT=Re-extract the complete official ZIP; do not edit its requirements files."
+    goto Failed
+)
+
 echo   [ STEP 1 / 3 ]   Private Python environment
 echo.
 call :ValidateEmbeddedPython
 if not errorlevel 1 (
-    if exist "%VENV%" call :RemoveDirectoryRobust "%VENV%"
+    if exist "%VENV%" call :RemoveDirectoryRobust "%%VENV%%"
     if exist "%VENV%" (
         set "FAIL_MESSAGE=An old .venv folder could not be removed after private Python was verified."
         set "REPAIR_HINT=Close programs using this folder, then retry. If it repeats, extract a fresh ZIP to a new folder."
@@ -267,7 +280,7 @@ if errorlevel 1 (
     set "REPAIR_HINT=Check your connection and free disk space, then retry. Use setup.log to see which download or check failed."
     goto Failed
 )
-if exist "%VENV%" call :RemoveDirectoryRobust "%VENV%"
+if exist "%VENV%" call :RemoveDirectoryRobust "%%VENV%%"
 if exist "%VENV%" (
     set "FAIL_MESSAGE=An invalid old .venv folder could not be removed."
     set "REPAIR_HINT=Close programs using this folder, then retry. If it repeats, extract a fresh ZIP to a new folder."
@@ -346,7 +359,7 @@ if errorlevel 1 (
 )
 echo      Every check passed.
 
-if exist "%DOWNLOADS%" call :RemoveDirectoryRobust "%DOWNLOADS%"
+if exist "%DOWNLOADS%" call :RemoveDirectoryRobust "%%DOWNLOADS%%"
 if exist "%DOWNLOADS%" (
     set "FAIL_MESSAGE=Setup passed its checks but could not safely remove temporary downloads."
     set "REPAIR_HINT=Close programs using the private download folder, then rerun setup to complete cleanup."
@@ -436,7 +449,7 @@ exit /b 1
 :AcquireSetupLock
 2>nul mkdir "%SETUP_LOCK%"
 if not errorlevel 1 goto SetupLockCreated
-call :ValidatePrivateTree "%SETUP_LOCK%"
+call :ValidatePrivateTree "%%SETUP_LOCK%%"
 if errorlevel 1 exit /b 1
 "%POWERSHELL_EXE%" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $lock=$env:SETUP_LOCK; $owner=$env:SETUP_LOCK_OWNER; $max=[double]$env:SETUP_LOCK_MAX_AGE_MINUTES; $fresh=(((Get-Date)-(Get-Item -LiteralPath $lock).CreationTime).TotalSeconds -lt 30); if($fresh){exit 2}; $owned=$false; $token=$null; if(Test-Path -LiteralPath $owner){try{$data=Get-Content -LiteralPath $owner -Raw -Encoding UTF8|ConvertFrom-Json; $token=[string]$data.token; $heartbeat=[DateTime]::Parse([string]$data.heartbeatUtc).ToUniversalTime(); $process=Get-CimInstance Win32_Process -Filter ('ProcessId=' + [int]$data.pid) -ErrorAction SilentlyContinue; if($process -and $process.Name -ieq 'cmd.exe'){$started=([DateTime]$process.CreationDate).ToUniversalTime(); $recorded=[DateTime]::Parse([string]$data.processStartedUtc).ToUniversalTime(); $sameProcess=[Math]::Abs(($started-$recorded).TotalSeconds) -lt 3; $dedicatedChild=($data.child -eq $true -and [string]$process.CommandLine -match '(?i)--fleece-setup-child(?:\s|$)'); if($sameProcess -and ($dedicatedChild -or ([DateTime]::UtcNow-$heartbeat).TotalMinutes -lt $max)){$owned=$true}}}catch{}}; if($owned){exit 2}; if(Test-Path -LiteralPath $owner){try{$latest=Get-Content -LiteralPath $owner -Raw -Encoding UTF8|ConvertFrom-Json; if($token -and [string]$latest.token -ne $token){exit 2}}catch{if($token){exit 2}}}; $stale=$lock+'.stale-'+[Guid]::NewGuid().ToString('N'); Move-Item -LiteralPath $lock -Destination $stale; Remove-Item -LiteralPath $stale -Recurse -Force" >nul 2>nul
 if errorlevel 1 exit /b 1
@@ -483,7 +496,7 @@ exit /b 0
 
 :ReleaseSetupLock
 if not "%SETUP_LOCK_HELD%"=="1" exit /b 0
-call :ValidatePrivateTree "%SETUP_LOCK%"
+call :ValidatePrivateTree "%%SETUP_LOCK%%"
 if errorlevel 1 exit /b 2
 "%POWERSHELL_EXE%" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; if(-not(Test-Path -LiteralPath $env:SETUP_LOCK_OWNER)){exit 2}; $data=Get-Content -LiteralPath $env:SETUP_LOCK_OWNER -Raw -Encoding UTF8|ConvertFrom-Json; if([string]$data.token -ne $env:SETUP_LOCK_TOKEN){exit 2}; $released=$env:SETUP_LOCK+'.released-'+[Guid]::NewGuid().ToString('N'); Move-Item -LiteralPath $env:SETUP_LOCK -Destination $released; Remove-Item -LiteralPath $released -Recurse -Force" >nul 2>nul
 set "RELEASE_LOCK_CODE=%ERRORLEVEL%"
@@ -498,18 +511,22 @@ exit /b %ERRORLEVEL%
 
 
 :ValidateEmbeddedPython
-call :ValidateEmbeddedPythonAt "%PYTHON_DIR%"
+call :ValidateEmbeddedPythonAt "%%PYTHON_DIR%%"
 exit /b %ERRORLEVEL%
 
 :ValidateEmbeddedPythonAt
 if "%~1"=="" exit /b 1
+set "EMBEDDED_CANDIDATE=%~1"
+call :ValidatePrivateTree "%%EMBEDDED_CANDIDATE%%"
+if errorlevel 1 exit /b 1
 if not exist "%~1\python.exe" exit /b 1
 if not exist "%~1\pythonw.exe" exit /b 1
 if not exist "%~1\Lib\site-packages" exit /b 1
 if not exist "%~1\pip.whl" exit /b 1
-call :VerifyFileHash "%~1\pip.whl" "%PIP_WHEEL_SHA256%"
+set "EMBEDDED_PIP=%~1\pip.whl"
+call :VerifyFileHash "%%EMBEDDED_PIP%%" "%%PIP_WHEEL_SHA256%%"
 if errorlevel 1 exit /b 1
-"%~1\python.exe" -I -c "import sys, struct, site; ok = sys.implementation.name == 'cpython' and sys.version_info[:3] == (3, 14, 7) and struct.calcsize('P') == 8 and any(p.lower().endswith(r'lib\site-packages') for p in sys.path); raise SystemExit(0 if ok else 1)" >>"%LOG%" 2>&1
+"%~1\python.exe" -I -c "import os, sys, struct, site, sysconfig; ok = sys.implementation.name == 'cpython' and sys.version_info[:3] == (3, 14, 7) and struct.calcsize('P') == 8 and sysconfig.get_platform().lower() == {'x64': 'win-amd64', 'arm64': 'win-arm64'}.get(os.environ.get('ARCH')) and any(p.lower().endswith(r'lib\site-packages') for p in sys.path); raise SystemExit(0 if ok else 1)" >>"%LOG%" 2>&1
 if errorlevel 1 exit /b 1
 "%~1\python.exe" -I -c "import sys; sys.path.insert(0, sys.argv[1]); from pip._internal.cli.main import main; raise SystemExit(main(sys.argv[2:]))" "%~1\pip.whl" --version >>"%LOG%" 2>&1
 exit /b %ERRORLEVEL%
@@ -521,23 +538,23 @@ if not errorlevel 1 exit /b 0
 set "PYTHON_ARCHIVE=%DOWNLOADS%\python-%PYTHON_VERSION%-embed-%ARCH%.zip"
 set "PYTHON_NEW=%RUNTIME%\python.new"
 set "PIP_DOWNLOAD=%DOWNLOADS%\pip.whl"
-call :DownloadAndVerify "%PYTHON_URL%" "%PYTHON_ARCHIVE%" "%PYTHON_SHA256%"
+call :DownloadAndVerify "%%PYTHON_URL%%" "%%PYTHON_ARCHIVE%%" "%%PYTHON_SHA256%%"
 if errorlevel 1 exit /b 1
-call :DownloadAndVerify "%PIP_WHEEL_URL%" "%PIP_DOWNLOAD%" "%PIP_WHEEL_SHA256%"
+call :DownloadAndVerify "%%PIP_WHEEL_URL%%" "%%PIP_DOWNLOAD%%" "%%PIP_WHEEL_SHA256%%"
 if errorlevel 1 exit /b 1
 
-if exist "%PYTHON_NEW%" call :RemoveDirectoryRobust "%PYTHON_NEW%"
+if exist "%PYTHON_NEW%" call :RemoveDirectoryRobust "%%PYTHON_NEW%%"
 if exist "%PYTHON_NEW%" exit /b 1
 set "ARCHIVE_FILE=%PYTHON_ARCHIVE%"
 set "NEW_DIR=%PYTHON_NEW%"
 "%POWERSHELL_EXE%" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; Expand-Archive -LiteralPath $env:ARCHIVE_FILE -DestinationPath $env:NEW_DIR -Force; $pth=Get-ChildItem -LiteralPath $env:NEW_DIR -Filter 'python*._pth' -File | Select-Object -First 1; if(-not $pth){throw 'Python archive did not contain its path configuration.'}; $lines=@(Get-Content -LiteralPath $pth.FullName | Where-Object { $_ -notmatch '^\s*#?\s*import site\s*$' -and $_ -notmatch '^\s*Lib\\site-packages\s*$' }); $lines += 'Lib\site-packages'; $lines += 'import site'; Set-Content -LiteralPath $pth.FullName -Value $lines -Encoding ASCII; New-Item -ItemType Directory -Path (Join-Path $env:NEW_DIR 'Lib\site-packages') -Force | Out-Null; Copy-Item -LiteralPath $env:PIP_DOWNLOAD -Destination (Join-Path $env:NEW_DIR 'pip.whl') -Force" >>"%LOG%" 2>&1
 if errorlevel 1 exit /b 1
 
-call :ValidateEmbeddedPythonAt "%PYTHON_NEW%"
+call :ValidateEmbeddedPythonAt "%%PYTHON_NEW%%"
 set "TEMP_VALIDATE_CODE=%ERRORLEVEL%"
 if not "%TEMP_VALIDATE_CODE%"=="0" exit /b 1
 
-call :ReplaceDirectory "%PYTHON_NEW%" "%PYTHON_DIR%"
+call :ReplaceDirectory "%%PYTHON_NEW%%" "%%PYTHON_DIR%%"
 if errorlevel 1 exit /b 1
 del /f /q "%PYTHON_ARCHIVE%" "%PIP_DOWNLOAD%" >nul 2>nul
 call :ValidateEmbeddedPython
@@ -556,6 +573,8 @@ if not defined APP_PY exit /b 1
 if not exist "%APP_PY%" exit /b 1
 call :ValidatePipRequirements
 if errorlevel 1 exit /b 1
+call :RecoverPackageTransaction
+if errorlevel 1 exit /b 1
 call :CurrentPackagesFullyHealthy
 if not errorlevel 1 exit /b 0
 call :BeginPackageTransaction
@@ -571,37 +590,55 @@ if errorlevel 1 exit /b 1
 call :VerifyPythonPackages
 exit /b %ERRORLEVEL%
 
-:BeginPackageTransaction
+:RecoverPackageTransaction
 if /I not "%ENV_MODE%"=="embedded" exit /b 1
 set "PACKAGE_BACKUP=%RUNTIME%\b"
 set "PACKAGE_BACKUP_NEW=%PACKAGE_BACKUP%.new"
 set "PACKAGE_TARGET=%PYTHON_DIR%"
 set "PACKAGE_BACKUP_PROBE=python.exe"
-if exist "%PACKAGE_BACKUP%" (
-    call :ValidatePrivateTree "%PACKAGE_BACKUP%"
-    if errorlevel 1 exit /b 1
-    if not exist "%PACKAGE_BACKUP%\%PACKAGE_BACKUP_PROBE%" exit /b 1
-    set "LOG_MESSAGE=Recovering the local package environment left by an interrupted repair."
-    call :LogCurrent
-    call :ReplaceDirectory "%PACKAGE_BACKUP%" "%PACKAGE_TARGET%"
-    if errorlevel 1 exit /b 1
-)
-if not exist "%PACKAGE_TARGET%" exit /b 1
-call :ValidatePrivateTree "%PACKAGE_TARGET%"
+if not exist "%PACKAGE_BACKUP%" exit /b 0
+call :ValidatePrivateTree "%%PACKAGE_BACKUP%%"
 if errorlevel 1 exit /b 1
-if exist "%PACKAGE_BACKUP_NEW%" call :RemoveDirectoryRobust "%PACKAGE_BACKUP_NEW%"
+rem A completed repair may leave an obsolete backup after cleanup is interrupted.
+rem Preserve a fully verified current runtime rather than downgrading it.
+call :ValidateEmbeddedPython
+if not errorlevel 1 (
+    call :CurrentPackagesFullyHealthy
+    if not errorlevel 1 (
+        call :RemoveDirectoryRobust "%%PACKAGE_BACKUP%%"
+        if exist "%PACKAGE_BACKUP%" exit /b 1
+        exit /b 0
+    )
+)
+rem Never replace current files with an incomplete or wrong-architecture backup.
+call :ValidateEmbeddedPythonAt "%%PACKAGE_BACKUP%%"
+if errorlevel 1 exit /b 1
+set "LOG_MESSAGE=Recovering the verified local package environment left by an interrupted repair."
+call :LogCurrent
+call :ReplaceDirectory "%%PACKAGE_BACKUP%%" "%%PACKAGE_TARGET%%"
+if errorlevel 1 exit /b 1
+call :ValidateEmbeddedPython
+exit /b %ERRORLEVEL%
+
+:BeginPackageTransaction
+call :RecoverPackageTransaction
+if errorlevel 1 exit /b 1
+if not exist "%PACKAGE_TARGET%" exit /b 1
+call :ValidatePrivateTree "%%PACKAGE_TARGET%%"
+if errorlevel 1 exit /b 1
+if exist "%PACKAGE_BACKUP_NEW%" call :RemoveDirectoryRobust "%%PACKAGE_BACKUP_NEW%%"
 if exist "%PACKAGE_BACKUP_NEW%" exit /b 1
 set "LOG_MESSAGE=Creating a local rollback copy before package repair."
 call :LogCurrent
 "%ROBOCOPY_EXE%" "%PACKAGE_TARGET%" "%PACKAGE_BACKUP_NEW%" /E /COPY:DAT /DCOPY:DAT /R:2 /W:1 /XJ /NFL /NDL /NJH /NJS /NP >>"%LOG%" 2>&1
 if errorlevel 8 exit /b 1
-call :ValidatePrivateTree "%PACKAGE_BACKUP_NEW%"
+call :ValidatePrivateTree "%%PACKAGE_BACKUP_NEW%%"
 if errorlevel 1 exit /b 1
 if not exist "%PACKAGE_BACKUP_NEW%\%PACKAGE_BACKUP_PROBE%" exit /b 1
 move "%PACKAGE_BACKUP_NEW%" "%PACKAGE_BACKUP%" >>"%LOG%" 2>&1
 if errorlevel 1 exit /b 1
 if not exist "%PACKAGE_BACKUP%" exit /b 1
-call :ValidatePrivateTree "%PACKAGE_BACKUP%"
+call :ValidatePrivateTree "%%PACKAGE_BACKUP%%"
 if errorlevel 1 exit /b 1
 if exist "%PACKAGE_BACKUP_NEW%" exit /b 1
 exit /b 0
@@ -609,15 +646,23 @@ exit /b 0
 :FinishPackageTransaction
 set "PACKAGE_TRANSACTION_CODE=%~1"
 if "%PACKAGE_TRANSACTION_CODE%"=="0" (
-    if exist "%PACKAGE_BACKUP%" call :RemoveDirectoryRobust "%PACKAGE_BACKUP%"
+    if exist "%PACKAGE_BACKUP%" call :RemoveDirectoryRobust "%%PACKAGE_BACKUP%%"
     if exist "%PACKAGE_BACKUP%" exit /b 1
     exit /b 0
 )
 set "LOG_MESSAGE=Package repair failed; restoring the previous private Python environment."
 call :LogCurrent
-call :ReplaceDirectory "%PACKAGE_BACKUP%" "%PACKAGE_TARGET%"
+call :ReplaceDirectory "%%PACKAGE_BACKUP%%" "%%PACKAGE_TARGET%%"
 if errorlevel 1 exit /b 1
 exit /b %PACKAGE_TRANSACTION_CODE%
+
+:CheckDependencyLock
+set "PIP_REQUIREMENTS_SHA256="
+if /I "%ARCH%"=="x64" set "PIP_REQUIREMENTS_SHA256=983be76416fc7d19411a99e0ffa72e8fe86ff930f2f191807373a1eb24bba84e"
+if /I "%ARCH%"=="arm64" set "PIP_REQUIREMENTS_SHA256=1ce422b1f781a71a6f5be9bd8aec8cff0b8f804d0d28e4f5780f52b8d997a79b"
+if not defined PIP_REQUIREMENTS_SHA256 exit /b 1
+"%POWERSHELL_EXE%" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $item=Get-Item -LiteralPath $env:PIP_REQUIREMENTS -Force; if($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw 'Dependency lock is unsafe'}; $stream=[IO.File]::OpenRead($item.FullName); $sha=[Security.Cryptography.SHA256]::Create(); try{$digest=([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-',''); if($digest -ne $env:PIP_REQUIREMENTS_SHA256){throw 'Dependency lock SHA-256 mismatch'}}finally{$stream.Dispose();$sha.Dispose()}" >>"%LOG%" 2>&1
+exit /b %ERRORLEVEL%
 
 :ValidatePipRequirements
 set "PIP_REQUIREMENTS_SHA256="
@@ -684,7 +729,7 @@ exit /b %ERRORLEVEL%
 
 :ResetEmbeddedPackages
 if /I not "%ENV_MODE%"=="embedded" exit /b 1
-call :RemoveDirectoryRobust "%LOCAL_SITE%"
+call :RemoveDirectoryRobust "%%LOCAL_SITE%%"
 if errorlevel 1 exit /b 1
 mkdir "%LOCAL_SITE%" >>"%LOG%" 2>&1
 if not exist "%LOCAL_SITE%" exit /b 1
@@ -694,13 +739,13 @@ exit /b 0
 set "REMOVE_TREE=%~1"
 if not defined REMOVE_TREE exit /b 1
 if not exist "%REMOVE_TREE%" exit /b 0
-call :ValidatePrivateTree "%REMOVE_TREE%"
+call :ValidatePrivateTree "%%REMOVE_TREE%%"
 if errorlevel 1 exit /b 1
 set "EMPTY_TREE=%RUNTIME%\empty-%RANDOM%-%RANDOM%"
 if exist "%EMPTY_TREE%" exit /b 1
 mkdir "%EMPTY_TREE%" >>"%LOG%" 2>&1
 if not exist "%EMPTY_TREE%" exit /b 1
-call :ValidatePrivateTree "%EMPTY_TREE%"
+call :ValidatePrivateTree "%%EMPTY_TREE%%"
 if errorlevel 1 exit /b 1
 "%ROBOCOPY_EXE%" "%EMPTY_TREE%" "%REMOVE_TREE%" /MIR /R:2 /W:1 /XJ /NFL /NDL /NJH /NJS /NP /NC /NS >nul 2>>"%LOG%"
 if errorlevel 8 exit /b 1
@@ -724,24 +769,24 @@ goto ReplaceDirectoryValuesReady
 :ReplaceDirectoryValuesReady
 set "REPLACE_BACKUP=%REPLACE_TARGET%.old"
 if not exist "%REPLACE_NEW%" exit /b 1
-call :ValidatePrivateTree "%REPLACE_NEW%"
+call :ValidatePrivateTree "%%REPLACE_NEW%%"
 if errorlevel 1 exit /b 1
 if exist "%REPLACE_TARGET%" (
-    call :ValidatePrivateTree "%REPLACE_TARGET%"
+    call :ValidatePrivateTree "%%REPLACE_TARGET%%"
     if errorlevel 1 exit /b 1
 )
 if exist "%REPLACE_BACKUP%" (
-    call :ValidatePrivateTree "%REPLACE_BACKUP%"
+    call :ValidatePrivateTree "%%REPLACE_BACKUP%%"
     if errorlevel 1 exit /b 1
     if exist "%REPLACE_TARGET%" (
-        call :RemoveDirectoryRobust "%REPLACE_BACKUP%"
+        call :RemoveDirectoryRobust "%%REPLACE_BACKUP%%"
         if errorlevel 1 exit /b 1
         if exist "%REPLACE_BACKUP%" exit /b 1
     ) else (
         move "%REPLACE_BACKUP%" "%REPLACE_TARGET%" >>"%LOG%" 2>&1
         if errorlevel 1 exit /b 1
         if exist "%REPLACE_BACKUP%" exit /b 1
-        call :ValidatePrivateTree "%REPLACE_TARGET%"
+        call :ValidatePrivateTree "%%REPLACE_TARGET%%"
         if errorlevel 1 exit /b 1
     )
 )
@@ -753,7 +798,7 @@ if errorlevel 1 exit /b 1
 move "%REPLACE_NEW%" "%REPLACE_TARGET%" >>"%LOG%" 2>&1
 if errorlevel 1 goto ReplaceRollback
 if exist "%REPLACE_BACKUP%" (
-    call :RemoveDirectoryRobust "%REPLACE_BACKUP%"
+    call :RemoveDirectoryRobust "%%REPLACE_BACKUP%%"
     if errorlevel 1 exit /b 1
 )
 if exist "%REPLACE_BACKUP%" exit /b 1
@@ -761,18 +806,18 @@ exit /b 0
 
 :ReplaceRollback
 if exist "%REPLACE_TARGET%" (
-    call :RemoveDirectoryRobust "%REPLACE_TARGET%"
+    call :RemoveDirectoryRobust "%%REPLACE_TARGET%%"
     if errorlevel 1 exit /b 1
 )
 if exist "%REPLACE_TARGET%" exit /b 1
 if not exist "%REPLACE_BACKUP%" exit /b 1
-call :ValidatePrivateTree "%REPLACE_BACKUP%"
+call :ValidatePrivateTree "%%REPLACE_BACKUP%%"
 if errorlevel 1 exit /b 1
 move "%REPLACE_BACKUP%" "%REPLACE_TARGET%" >>"%LOG%" 2>&1
 if errorlevel 1 exit /b 1
 if exist "%REPLACE_BACKUP%" exit /b 1
 if not exist "%REPLACE_TARGET%" exit /b 1
-call :ValidatePrivateTree "%REPLACE_TARGET%"
+call :ValidatePrivateTree "%%REPLACE_TARGET%%"
 if errorlevel 1 exit /b 1
 exit /b 1
 
@@ -782,7 +827,7 @@ set "DL_FILE=%~2"
 set "DL_HASH=%~3"
 if not defined DL_HASH exit /b 1
 if not exist "%DL_FILE%" goto DownloadFresh
-call :VerifyFileHash "%DL_FILE%" "%DL_HASH%"
+call :VerifyFileHash "%%DL_FILE%%" "%%DL_HASH%%"
 if not errorlevel 1 (
     set "LOG_MESSAGE=Reusing an already downloaded file that passed SHA-256 verification: %DL_FILE%"
     call :LogCurrent
@@ -811,7 +856,7 @@ if errorlevel 1 exit /b 1
 call :TouchSetupLock
 if errorlevel 1 exit /b 1
 if not exist "%DL_FILE%" exit /b 1
-call :VerifyFileHash "%DL_FILE%" "%DL_HASH%"
+call :VerifyFileHash "%%DL_FILE%%" "%%DL_HASH%%"
 exit /b %ERRORLEVEL%
 
 :VerifyFileHash
@@ -847,14 +892,14 @@ if errorlevel 1 exit /b 1
 "%APP_PY%" -I -c "import os; from pathlib import Path; app=Path(os.environ['APP_FILE']); assert app.is_file(); compile(app.read_text(encoding='utf-8'), str(app), 'exec'); print('Application source compiled successfully.')" >>"%LOG%" 2>&1
 if errorlevel 1 exit /b 1
 set "CHECK_DIR=%RUNTIME%\setup-check"
-if exist "%CHECK_DIR%" call :RemoveDirectoryRobust "%CHECK_DIR%"
+if exist "%CHECK_DIR%" call :RemoveDirectoryRobust "%%CHECK_DIR%%"
 if exist "%CHECK_DIR%" exit /b 1
 mkdir "%CHECK_DIR%" >>"%LOG%" 2>&1
 if not exist "%CHECK_DIR%" exit /b 1
 "%APP_PY%" -I "%APP_FILE%" --self-test "%CHECK_DIR%" >>"%LOG%" 2>&1
 if errorlevel 1 exit /b 1
 if not exist "%CHECK_DIR%\self-test-passed.txt" exit /b 1
-call :RemoveDirectoryRobust "%CHECK_DIR%"
+call :RemoveDirectoryRobust "%%CHECK_DIR%%"
 if exist "%CHECK_DIR%" exit /b 1
 exit /b 0
 

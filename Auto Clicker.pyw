@@ -13,7 +13,7 @@ from pathlib import Path
 
 
 APP_NAME = "Auto Clicker"
-APP_VERSION = "1.0.11"
+APP_VERSION = "1.0.12"
 APP_DIR = Path(__file__).resolve().parent
 RUNTIME_DIR = APP_DIR / ".runtime"
 SETTINGS_PATH = RUNTIME_DIR / "settings.ini"
@@ -566,13 +566,12 @@ def build_config(values):
     if repeat_mode == REPEAT_MANUAL:
         repeat_value = 0.0
     elif repeat_mode == REPEAT_COUNT:
-        repeat_value = float(
-            parse_integer(values["repeat_value"], "Number of clicks")
-        )
+        repeat_value = parse_integer(values["repeat_value"], "Number of clicks")
         if not 1 <= repeat_value <= 1_000_000_000:
             raise ValueError(
                 "The number of clicks must be between 1 and 1,000,000,000."
             )
+        repeat_value = float(repeat_value)
     elif repeat_mode == REPEAT_SECONDS:
         repeat_value = parse_number(values["repeat_value"], "Number of seconds")
         if not 0.1 <= repeat_value <= 604_800:
@@ -784,7 +783,14 @@ def run_click_loop(
         try:
             if move_to is not None:
                 move_to(config.target_x, config.target_y)
+            # Positioning can block long enough for cancellation or the duration
+            # deadline to arrive. Do not send another input after either occurs.
+            if stop_is_set():
+                break
             action_started = perf_counter()
+            if duration_deadline is not None and action_started >= duration_deadline:
+                on_count(actions)
+                return "completed", actions, "Requested duration completed."
             send_click()
         except OSError as error:
             return "failed", actions, f"Windows could not send the click: {error}"
@@ -880,14 +886,17 @@ class HotkeyMonitor(threading.Thread):
         try:
             self._run_hotkey_loop()
         except BaseException as error:
+            with self._lock:
+                if self._active_stop_event is not None:
+                    self._active_stop_event.set()
             if self._closing.is_set():
                 return
             error_name = type(error).__name__
             try:
                 self.bridge.hotkey_failed.emit(
                     "The global shortcut monitor stopped unexpectedly "
-                    f"({error_name}). Use the Start and Stop buttons, then "
-                    "restart the app to restore keyboard shortcuts."
+                    f"({error_name}). Clicking was stopped for safety. "
+                    "Restart the app to restore F8 and keyboard shortcuts."
                 )
             except RuntimeError:
                 pass
@@ -2254,6 +2263,9 @@ class AutoClicker(QMainWindow):
     def start_clicking(self):
         if self.testing or self.running:
             return
+        if not self.hotkey_available:
+            self.status_label.setText("Restart to restore the emergency shortcut")
+            return
         self.enforce_rate_limit(notify=True)
         try:
             config = build_config(self.current_values())
@@ -2360,7 +2372,10 @@ class AutoClicker(QMainWindow):
         self.start_button.style().unpolish(self.start_button)
         self.start_button.style().polish(self.start_button)
         self.set_controls_enabled(True)
-        if state == "completed":
+        if not self.hotkey_available:
+            self.start_button.setEnabled(False)
+            self.status_label.setText("Restart to restore the emergency shortcut")
+        elif state == "completed":
             self.status_label.setText("Completed")
         elif state == "failed":
             self.status_label.setText("Clicking failed")
@@ -2381,7 +2396,11 @@ class AutoClicker(QMainWindow):
     @Slot(str)
     def hotkey_monitor_failed(self, message):
         self.hotkey_available = False
+        if self.worker_stop is not None:
+            self.worker_stop.set()
         self.hotkey_button.setEnabled(False)
+        self.start_button.setEnabled(False)
+        self.hotkey_note.setText("Keyboard shortcuts, including F8, are unavailable. Restart the app.")
         self.status_label.setText("Keyboard shortcut unavailable")
         self.append_log(message)
 
@@ -2456,7 +2475,7 @@ def run_self_test(output_dir):
     output_dir.mkdir(parents=True, exist_ok=True)
     checks = []
 
-    assert APP_VERSION == "1.0.11"
+    assert APP_VERSION == "1.0.12"
     checks.append("release version")
 
     values = {

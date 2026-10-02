@@ -2,6 +2,10 @@
 
 # auto clicker
 
+Current audit update: **v1.0.12**. Includes app-specific bug fixes, bounded offline regression/performance tests, and shared setup hardening.
+
+All Fleece desktop tools use the same installation workflow: download the official ZIP, extract the entire folder, run `Installer.bat`, accept the bundled Terms/Tool License, wait for final checks, then open the folder-local shortcut. Setup installs a private runtime without changing system Python or requiring administrator access. Rerun it to repair or refresh a moved shortcut. Keep the full path at most 72 characters, without percent signs. Architecture support and extra components vary by tool; File Converter remains x64-only.
+
 A little tool I made with AI to automate mouse clicking locally on 64-bit Windows.
 
 <img src="Auto%20Clicker.png" alt="Auto Clicker app window" width="760">
@@ -58,6 +62,8 @@ Run `Installer.bat` again to repair the private components or after moving the c
 
 One-click mode supports up to 500 clicks per second. Double-click mode supports up to 250 double-click actions per second. The rate another app receives still depends on Windows, that app, and the computer.
 
+These are maximum allowed rates, not a guarantee of delivery speed. Test a low rate first, especially at a saved position. Random timing never exceeds these caps. Count mode allows up to 1,000,000,000 actions; duration mode allows up to 7 days, and the start delay allows up to 1 hour. The activity view retains the latest 500 lines.
+
 ## built with
 
 - [PySide6](https://doc.qt.io/qtforpython-6/)
@@ -76,7 +82,11 @@ If setup stops, the window shows the failed check and a short **How to fix it** 
 
 If the `Auto Clicker` shortcut does not open, run `Installer.bat` again and keep the complete extracted folder together. Setup recreates and validates the shortcut for the folder's current location.
 
-If a keyboard shortcut is already reserved by Windows or another app, choose a different combination. F8 always remains the emergency stop.
+If a keyboard shortcut is already reserved by Windows or another app, choose a different combination. F8 is the fixed emergency stop while the keyboard monitor is working. If that monitor fails, the app stops the active click job and blocks new jobs; restart the app to restore the shortcuts.
+
+## offline regression checks
+
+From the extracted source folder, run `.runtime\python\python.exe -I scripts\Test-AppSafety.py`. The suite uses fake mouse input, an offscreen Qt window, and disposable preference files. It never clicks the desktop. It checks malformed input, cancellation and duration boundaries, emergency-stop failures, settings, log limits, and bounded scheduler/GUI-response workloads. Use `--report PATH` to save measurements as JSON. Timing budgets are regression tripwires, not performance guarantees for another app or computer.
 
 ## license
 
